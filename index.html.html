@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Inventario de Ventas</title>
+
+  <!-- SheetJS -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.full.min.js"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0; padding: 0;
+      background: #f4f6f9; color: #333;
+    }
+    header {
+      background: #2c3e50; color: #fff;
+      padding: 10px; text-align: center;
+      position: sticky; top: 0; z-index: 100;
+    }
+    header h1 {
+      margin: 0; font-size: 24px;
+      cursor: text;
+    }
+    details {
+      background: #ecf0f1; margin: 15px; padding: 10px;
+      border-radius: 8px;
+    }
+    details summary {
+      font-weight: bold; cursor: pointer;
+    }
+    form label { display:block; margin-top:8px; }
+    form input, form select {
+      width: 100%; padding:6px; margin-top:2px;
+      border:1px solid #ccc; border-radius:4px;
+    }
+    button {
+      background:#3498db; color:#fff;
+      border:none; border-radius:4px;
+      padding:8px 14px; margin-top:10px;
+      cursor:pointer; font-size:14px;
+    }
+    button:hover { background:#2980b9; }
+    table {
+      width: 100%; border-collapse: collapse;
+      background: #fff;
+    }
+    th, td {
+      border:1px solid #ddd;
+      padding:8px; text-align:center;
+    }
+    th { background:#34495e; color:#fff; }
+    tr:nth-child(even){ background:#f9f9f9; }
+    tr:hover{ background:#f1f1f1; }
+    .estado-vendido { background:#2ecc71;color:#fff;font-weight:bold; }
+    .estado-no { background:#e74c3c;color:#fff;font-weight:bold; }
+    .estado-pendiente { background:#f39c12;color:#fff;font-weight:bold; }
+    footer {
+      background:#2c3e50; color:#fff;
+      text-align:center; padding:10px;
+      position: sticky; bottom: 0;
+    }
+    footer button {
+      margin: 5px; background:#16a085;
+    }
+    footer button:hover { background:#13856e; }
+    #buscador {
+      margin:10px; width:calc(100% - 20px);
+      padding:8px; border:1px solid #ccc; border-radius:4px;
+    }
+    #resumenPorPago {
+      margin:15px; background:#fff; padding:10px;
+      border-radius:6px; box-shadow:0 2px 4px rgba(0,0,0,0.1);
+    }
+    #modalImagen {
+      display:none;position:fixed;inset:0;
+      background:rgba(0,0,0,0.8);
+      justify-content:center;align-items:center;
+      z-index:1000;
+    }
+    #modalImagen img {
+      max-width:90%; max-height:90%; border-radius:8px;
+    }
+    #cerrarModal {
+      position:absolute;top:15px;right:15px;
+      background:#fff;border:none;border-radius:50%;
+      width:32px;height:32px;font-size:18px;cursor:pointer;
+    }
+    .tabla-scroll {
+      overflow-x:auto; margin: 10px;
+    }
+    /* Colores para pagos */
+select.pago-efectivo {
+  background: #27ae60;
+  color: #fff;
+  font-weight: bold;
+}
+select.pago-transferencia {
+  background: #8e44ad;
+  color: #fff;
+  font-weight: bold;
+}
+select.pago-vacio {
+  background: #bdc3c7;
+  color: #333;
+  font-weight: bold;
+}
+
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="tituloInventario" contenteditable="true">VENTAS</h1>
+  </header>
+
+  <details id="nuevo-producto">
+    <summary>➕ Nuevo</summary>
+    <form id="formulario">
+      <label for="nombre">Nombre:</label>
+      <input type="text" id="nombre" required />
+
+      <label for="local">Local:</label>
+      <select id="local" required onchange="toggleNombreLocal()">
+        <option value="" disabled selected>Seleccionar</option>
+        <option value="Mi local">Mi local</option>
+        <option value="Permitido">Permitido</option>
+      </select>
+      <div id="nombre-local-container" style="display:none;">
+        <label for="nombre-local">Nombre del local:</label>
+        <input type="text" id="nombre-local"/>
+      </div>
+      <div id="costo-container" style="display:none;">
+        <label for="costo">Precio costo:</label>
+        <input type="number" id="costo" step="0.01"/>
+      </div>
+
+      <label for="cliente">Cliente:</label>
+      <select id="cliente" required>
+        <option value="" disabled selected>Seleccionar</option>
+        <option value="Permitido">Permitido</option>
+        <option value="Público">Público</option>
+      </select>
+
+      <label for="venta">Precio venta:</label>
+      <input type="number" id="venta" step="0.01"/>
+
+      <label for="talla">Talla:</label>
+      <input type="text" id="talla"/>
+
+      <label for="imagen">Imagen:</label>
+      <input type="file" id="imagen" accept="image/*"/>
+    </form>
+    <button id="btnAgregar">Agregar</button>
+  </details>
+
+  <div id="resumenPorPago"></div>
+  <input type="text" id="buscador" placeholder="Buscar por nombre, local o cliente..."/>
+
+  <div class="tabla-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Estado</th>
+          <th>Pago</th>
+          <th>Foto</th>
+          <th>Local</th>
+          <th>Cliente</th>
+          <th>Precio Costo</th>
+          <th>Precio Venta</th>
+          <th>Talla</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="tabla"></tbody>
+    </table>
+  </div>
+
+  <!-- Modal imagen -->
+  <div id="modalImagen">
+    <div style="position:relative;">
+      <img id="imagenGrande"/>
+      <button id="cerrarModal">&times;</button>
+    </div>
+  </div>
+
+  <footer>
+    <button id="btnExportarExcel"><i class="fas fa-file-excel"></i> Exportar Excel</button>
+    <button id="btnEliminarTodo">🗑️ Eliminar Todo</button>
+    <button id="btnExportarVentasHoy">📤 Ventas del Día</button>
+  </footer>
+
+  <script>
+  // Config Firebase
+  const firebaseConfig = {
+    apiKey: "AIzaSyBEWbN1BfsNUWWOy0DpU0E7o7Ku09lcweQ",
+    authDomain: "modayestilocol.firebaseapp.com",
+    projectId: "modayestilocol",
+    storageBucket: "modayestilocol.firebasestorage.app",
+    messagingSenderId: "794561383601",
+    appId: "1:794561383601:web:e11695d3b9ccfd2659a690"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+
+  const form=document.getElementById("formulario");
+  const tabla=document.getElementById("tabla");
+  const buscador=document.getElementById("buscador");
+  const titulo=document.getElementById("tituloInventario");
+  const resumenPagoEl=document.getElementById("resumenPorPago");
+  let productos=[];
+
+  // Título solo en localStorage
+  titulo.textContent=localStorage.getItem("tituloInventario")||"VENTAS";
+  titulo.addEventListener("input",()=>localStorage.setItem("tituloInventario",titulo.textContent.trim()));
+
+  function hoyISO(){return new Date().toISOString().split("T")[0];}
+  async function convertirImagenABase64(file){return new Promise((res,rej)=>{if(!file)return res("");const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej("Error");r.readAsDataURL(file);});}
+
+  // Tiempo real
+  db.collection("productos").onSnapshot(snapshot=>{
+    productos=[];snapshot.forEach(doc=>productos.push({id:doc.id,...doc.data()}));
+    renderTabla();
+  });
+
+  // Agregar
+  document.getElementById("btnAgregar").addEventListener("click",()=>form.requestSubmit());
+  form.addEventListener("submit",async e=>{
+    e.preventDefault();
+    const producto={
+      nombre:form.nombre.value.trim(),
+      local: form.local.value==="Permitido" && form["nombre-local"].value.trim()?`Permitido (${form["nombre-local"].value.trim()})`:form.local.value,
+      cliente:form.cliente.value.trim(),
+      costo:parseFloat(form.costo.value)||0,
+      venta:parseFloat(form.venta.value)||0,
+      talla:form.talla.value.trim(),
+      imagen:await convertirImagenABase64(form.imagen.files[0]),
+      estado:"",pago:"",fecha:hoyISO()
+    };
+    await db.collection("productos").add(producto);
+    form.reset();
+    document.getElementById("nombre-local-container").style.display="none";
+    document.getElementById("costo-container").style.display="none";
+  });
+// Render
+function renderTabla() {
+  const filtro = buscador.value.toLowerCase();
+  tabla.innerHTML = "";
+  const filtrados = productos.filter(p =>
+    (p.nombre || "").toLowerCase().includes(filtro) ||
+    (p.local || "").toLowerCase().includes(filtro) ||
+    (p.cliente || "").toLowerCase().includes(filtro)
+  );
+
+  if (!filtrados.length) {
+    tabla.innerHTML = `<tr><td colspan="10">No hay productos.</td></tr>`;
+    return;
+  }
+
+  filtrados.forEach(p => {
+    // Estado con clases de color
+    let claseEstado = "estado-vacio";
+    if (p.estado === "Sí") claseEstado = "estado-vendido";
+    else if (p.estado === "No") claseEstado = "estado-no";
+    else if (p.estado === "Per") claseEstado = "estado-pendiente";
+
+    // Pago con clases de color
+    let pagoHTML = "<span style='color:#888;'>—</span>";
+    if (p.estado === "Sí") {
+      let pagoClase = "pago-vacio";
+      if (p.pago === "Efectivo") pagoClase = "pago-efectivo";
+      if (p.pago === "Transferencia") pagoClase = "pago-transferencia";
+
+      pagoHTML = `<select class="${pagoClase}" onchange="actualizarPago('${p.id}',this.value)">
+        <option value="" disabled ${!p.pago ? "selected" : ""}>Seleccione pago</option>
+        <option value="Efectivo" ${p.pago === "Efectivo" ? "selected" : ""}>Efectivo</option>
+        <option value="Transferencia" ${p.pago === "Transferencia" ? "selected" : ""}>Transferencia</option>
+      </select>`;
+    }
+
+    const fila = document.createElement("tr");
+    fila.innerHTML = `
+      <td>${p.nombre}</td>
+      <td>
+        <select class="${claseEstado}" onchange="actualizarEstado('${p.id}',this.value)">
+          <option value="" disabled ${!p.estado ? "selected" : ""}>Seleccionar</option>
+          <option value="Sí" ${p.estado === "Sí" ? "selected" : ""}>Vendido</option>
+          <option value="No" ${p.estado === "No" ? "selected" : ""}>Regreso</option>
+          <option value="Per" ${p.estado === "Per" ? "selected" : ""}>Pendiente</option>
+        </select>
+      </td>
+      <td>${pagoHTML}</td>
+      <td>${p.imagen ? `<img src="${p.imagen}" width="50"/>` : ""}</td>
+      <td>${p.local}</td>
+      <td>${p.cliente}</td>
+      <td>${p.costo}</td>
+      <td>${p.venta}</td>
+      <td>${p.talla}</td>
+      <td><button onclick="Eliminar('${p.id}')" style="background:#e74c3c;">🗑️</button></td>
+    `;
+    tabla.appendChild(fila);
+  });
+
+  resumenPorMetodoDePago();
+}
+
+  function actualizarPago(id, valor) {
+  // Guardar en Firestore
+  db.collection("productos").doc(id).update({ pago: valor });
+
+  // Cambiar color del select al instante
+  const select = document.querySelector(`select[onchange="actualizarPago('${id}',this.value)"]`);
+  if (select) {
+    select.classList.remove("pago-efectivo", "pago-transferencia", "pago-vacio");
+    if (valor === "Efectivo") select.classList.add("pago-efectivo");
+    else if (valor === "Transferencia") select.classList.add("pago-transferencia");
+    else select.classList.add("pago-vacio");
+  }
+}
+
+  function actualizarEstado(id, valor) {
+  const data = { estado: valor };
+  if (valor === "Sí") {
+    data.fecha = hoyISO();
+  }
+
+  // Guardar en Firestore
+  db.collection("productos").doc(id).update(data);
+
+  // Cambiar color del select al instante
+  const select = document.querySelector(`select[onchange="actualizarEstado('${id}',this.value)"]`);
+  if (select) {
+    select.classList.remove("estado-vendido", "estado-no", "estado-pendiente", "estado-vacio");
+    if (valor === "Sí") select.classList.add("estado-vendido");
+    else if (valor === "No") select.classList.add("estado-no");
+    else if (valor === "Per") select.classList.add("estado-pendiente");
+    else select.classList.add("estado-vacio");
+  }
+}
+
+  function Eliminar(id){if(confirm("¿Eliminar producto?"))db.collection("productos").doc(id).delete();}
+  async function eliminarTodo(){if(confirm("¿Eliminar TODO?")){const snap=await db.collection("productos").get();const batch=db.batch();snap.forEach(doc=>batch.delete(doc.ref));await batch.commit();alert("Inventario eliminado");}}
+
+  function exportarExcel(){const wb=XLSX.utils.book_new();const ws=XLSX.utils.json_to_sheet(productos);XLSX.utils.book_append_sheet(wb,ws,"Inventario");XLSX.writeFile(wb,`Inventario_${hoyISO()}.xlsx`);}
+  function exportarVentasHoy(){const hoy=hoyISO();const vendidos=productos.filter(p=>p.estado==="Sí"&&p.fecha===hoy);if(!vendidos.length){alert("No hay ventas hoy.");return;}const ws=XLSX.utils.json_to_sheet(vendidos);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"VentasHoy");XLSX.writeFile(wb,`Ventas_${hoy}.xlsx`);}
+
+  function resumenPorMetodoDePago(){
+    const vendidos=productos.filter(p=>p.estado==="Sí"&&p.fecha===hoyISO());
+    let resumen={Efectivo:{total:0,cantidad:0},Transferencia:{total:0,cantidad:0}},total=0;
+    vendidos.forEach(p=>{if(p.pago==="Efectivo"||p.pago==="Transferencia"){resumen[p.pago].total+=parseFloat(p.venta)||0;resumen[p.pago].cantidad++;total+=parseFloat(p.venta)||0;}});
+    resumenPagoEl.innerHTML=`
+      <table border="1" cellpadding="6" style="border-collapse:collapse;">
+        <tr><th>Método</th><th>Cantidad</th><th>Total</th></tr>
+        <tr><td>Efectivo</td><td>${resumen.Efectivo.cantidad}</td><td>${resumen.Efectivo.total.toFixed(2)}</td></tr>
+        <tr><td>Transferencia</td><td>${resumen.Transferencia.cantidad}</td><td>${resumen.Transferencia.total.toFixed(2)}</td></tr>
+        <tr style="font-weight:bold;"><td>Total</td><td>${resumen.Efectivo.cantidad+resumen.Transferencia.cantidad}</td><td>${total.toFixed(2)}</td></tr>
+      </table>`;
+  }
+
+  document.addEventListener("dblclick",e=>{if(e.target.tagName==="IMG"){document.getElementById("imagenGrande").src=e.target.src;document.getElementById("modalImagen").style.display="flex";}});
+  document.getElementById("modalImagen").addEventListener("click",e=>{if(e.target.id==="modalImagen"||e.target.id==="cerrarModal"){document.getElementById("modalImagen").style.display="none";}});
+  buscador.addEventListener("input",renderTabla);
+  document.getElementById("btnExportarExcel").addEventListener("click",exportarExcel);
+  document.getElementById("btnEliminarTodo").addEventListener("click",eliminarTodo);
+  document.getElementById("btnExportarVentasHoy").addEventListener("click",exportarVentasHoy);
+
+  function toggleNombreLocal(){
+    const mostrar=document.getElementById("local").value==="Permitido";
+    document.getElementById("nombre-local-container").style.display=mostrar?"block":"none";
+    document.getElementById("costo-container").style.display=mostrar?"block":"none";
+  }
+  </script>
+</body>
+</html>
